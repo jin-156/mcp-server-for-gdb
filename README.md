@@ -2,7 +2,8 @@
 
 MCP server for GDB in WSL (supports pwndbg, gef, peda, and vanilla GDB)
 
-![alt text](image.png)
+![Uploading image.png…]()
+
 
 # ⚙️ Settings
 
