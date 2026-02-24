@@ -23,11 +23,6 @@ def remove_ansi_escape_codes(text: str) -> str:
 
 # Clear the initial GDB stdout buffer until the prompt is reached
 def clear_initial_buffer(timeout: int = 3) -> list:
-    """Clear the initial output produced by the GDB subprocess.
-
-    This drains startup banners and waits for the configured prompt so the
-    server starts with a clean I/O state.
-    """
     global gdb
     debug_log = []
     debug_log.append("[DEBUG] Clearing initial GDB output buffer...")
