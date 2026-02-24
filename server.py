@@ -10,8 +10,6 @@ gdb = None
 gdb_connected = False
 debug_enabled = False
 
-# Set a fixed prompt here to override automatic plugin detection.
-# Otherwise call `select_plugin()` after `gdb_connect()` to auto-detect the prompt.
 prompt = "(gdb)"
 
 # ============================================================================
@@ -35,28 +33,31 @@ def clear_initial_buffer(timeout: int = 3) -> list:
     debug_log.append("[DEBUG] Clearing initial GDB output buffer...")
     
     start_time = time.time()
-    found_prompt = False
-    
-    while time.time() - start_time < timeout:
+    collected = []
+    empty_count = 0
+
+    while True:
         try:
             line = gdb.stdout.readline()
             if line:
+                empty_count = 0
                 clean_line = remove_ansi_escape_codes(line)
+                collected.append(clean_line)
                 debug_log.append(f"[DEBUG] Initial Buffer: {repr(clean_line.strip())}")
-                
-                if prompt in clean_line:
-                    debug_log.append(f"[DEBUG] {prompt} Detected in initial buffer → stopping clear")
-                    found_prompt = True
-                    break
             else:
+                empty_count += 1
+                if empty_count > 100:
+                    debug_log.append("[DEBUG] Initial buffer empty-read threshold exceeded, stopping collect")
+                    break
                 time.sleep(0.01)
         except:
             time.sleep(0.01)
 
-    if not found_prompt:
-        debug_log.append(f"[DEBUG] 타임아웃: {prompt} Could not be detected in initial buffer after {timeout} seconds")
+        if time.time() - start_time > timeout:
+            debug_log.append(f"[DEBUG] Finished clearing initial buffer by timeout; collected {len(collected)} lines")
+            break
 
-    return debug_log
+    return debug_log, collected
 
 # Execute a GDB command and capture its output until the prompt
 def execute_cmd(cmd:str):
@@ -147,18 +148,29 @@ def disable_debug_mode():
 # Plugin selection and prompt configuration
 @mcp.tool()
 def select_plugin(plugin: str):
-    """select plugin (pwndbg, peda, gef)"""
+    """select plugin (pwndbg, peda, gef, gdb) and set expected prompt"""
+
+    global prompt, gdb_connected, gdb
+
     plugin = plugin.lower()
-    if plugin not in ['pwndbg', 'peda', 'gef']:
-        return "Invalid plugin. Please choose from: pwndbg, peda, gef"
-    
-    global prompt
-    if plugin == 'pwndbg':
-        prompt = "pwndbg>"
-    elif plugin == 'peda':
-        prompt = "peda>"
-    elif plugin == 'gef':
-        prompt = "gef>"
+    valid = ['pwndbg', 'peda', 'gef', 'gdb']
+    if plugin not in valid:
+        return f"Invalid plugin. Choose from: {', '.join(valid)}"
+
+    prompt_map = {
+        'pwndbg': "pwndbg>",
+        'peda':   "peda>",
+        'gef':    "gef➤",
+        'gdb':    "(gdb)"
+    }
+
+    prompt = prompt_map[plugin]
+
+    if gdb_connected and gdb is not None:
+        try:
+            execute_cmd(f"set prompt {prompt}")
+        except:
+            pass
 
     return f"✓ Plugin set to {plugin} - expecting prompt: {prompt}"
 
@@ -207,17 +219,21 @@ def gdb_connect(target: str):
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
     debug_log.append("[DEBUG] stdout non-blocking 모드 설정 완료")
 
-    buffer_debug_log = clear_initial_buffer(timeout=3)
+    buffer_debug_log, initial_output = clear_initial_buffer(timeout=3)
     debug_log.extend(buffer_debug_log)
-    
+
     gdb_connected = True
-    
+
+    initial_text = "".join(initial_output)
+
     if debug_enabled:
-        return "\n".join(debug_log)
+        return "\n".join(debug_log) + "\n\n=== INITIAL BUFFER ===\n" + initial_text
 
     return (
         f"✓ Connected to {target}\n"
-        "Next: if you use a plugin, run select_plugin('pwndbg' | 'gef' | 'peda') so the server can detect the right prompt.\n"
+        "=== INITIAL BUFFER ===\n"
+        + initial_text + "\n"
+        "Next: run select_plugin('pwndbg' | 'gef' | 'peda') to set the expected prompt.\n"
         "Vanilla gdb (no plugin): keep the default prompt '(gdb)'."
     )
 
